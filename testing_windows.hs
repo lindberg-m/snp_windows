@@ -19,6 +19,6 @@ testDat_Snps = [
   ]
 
 testConfig = WindowConfig 100 10 
-testState = initWindows (windowSize testConfig) (windowStep testConfig) "chrom_1"
+testState = initWindows testConfig
 
 
