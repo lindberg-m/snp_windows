@@ -1,6 +1,7 @@
 module Snp_windows where
 
 import Control.Monad.State
+import Control.Monad.Reader
 import Data.List (groupBy)
 
 type Pos   = Int
@@ -34,26 +35,27 @@ data SNP a = SNP {
 
 
 calcWindows :: WindowConfig -> [SNP a] -> [(Chrom, [Window a])]
-calcWindows wc snps = map windows chrSnps 
+calcWindows wc snps = map toWindows chrSnps 
   where
-    chrSnps       = groupBy (\a b -> chrom a == chrom b) snps
-    windows snps' = (chrom $ head snps', align (initWindows wc) snps')
+    chrSnps         = groupBy (\a b -> chrom a == chrom b) snps
+    toWindows snps' = (chrom $ head snps', align (initWindows wc) snps')
 
--- Populate the window-state with snp-data and return
--- a list of populated windows
+{- Populate the window-state with snp-data and return
+   a list of populated windows -}
 align :: WindowState a -> [SNP a] -> [Window a]
-align ws [] = evalState flushActiveWindows ws
-align ws (snp:snps) = let
-  (doneWindows, newWindows) = runState (alignSnp snp) ws
-  in doneWindows ++ (align newWindows snps)
+align ws [] = active ws   -- Flush out all remaining active windows and stop
+align ws (snp:snps) = doneWindows ++ (align newWindows snps)
+  where
+    (doneWindows, newWindows) = runState (alignSnp snp) ws
 
--- Compare the current SNP to our window state.
--- Active and inactive windows which has an endpoint
--- above the current SNP should be returned, active
--- windows for which the SNP is overlapping should
--- be updated to carry the SNP-data, and any inactive
--- windows that have overlapping positions should be 
--- updated and moved to the 'active' position.
+{- Compare the current SNP to the window state:
+ Active and inactive windows which has endpoints
+ above the current SNP should be returned, active
+ windows for which the SNP is overlapping should
+ be updated to also carry the current SNP-data, 
+ and any inactive windows that have overlapping 
+ positions should be updated and moved to 
+ the 'active' position.  -}
 alignSnp :: SNP a -> State (WindowState a) [Window a]
 alignSnp snp = do
   ws <- get
@@ -70,15 +72,9 @@ alignSnp snp = do
   put $ WindowState newActive remaining''
   return $ passed ++ passed'
 
-flushActiveWindows :: State (WindowState a) [Window a]
-flushActiveWindows = do
-   ws <- get
-   put $ WindowState [] (inactive ws)
-   return $ active ws
-
--- Generate a window state which has empty active
--- windows, and an infinite list of inactive windows
--- based on the passed config
+{- Generate a window state which has empty active
+ windows, and an infinite list of inactive windows
+ with sizes based on the passed config -}
 initWindows :: WindowConfig -> WindowState a
 initWindows cfg = let 
   size = windowSize cfg

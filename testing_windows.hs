@@ -10,8 +10,8 @@ testDat_Snps = [
   , SNP "chrom_1" 49 0.1023
   , SNP "chrom_1" 104 0.943
   , SNP "chrom_1" 599 0.904123
-  , SNP "chrom_1" 100043 0.332
-  , SNP "chrom_1" 1000434 0.123
+--  , SNP "chrom_1" 100043 0.332
+--  , SNP "chrom_1" 1000434 0.123
   , SNP "chrom_2" 43 0.23
   , SNP "chrom_2" 43 1.0
   , SNP "chrom_2" 43 0
