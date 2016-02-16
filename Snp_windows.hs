@@ -1,11 +1,11 @@
-module Snp_windows where
+module Snp_windows (calcWindows, Window (..), initWindows, WindowConfig (..), SNP (..) ) where
 
 import Control.Monad.State
-import Control.Monad.Reader
+import Data.Text.Lazy (Text)
 import Data.List (groupBy)
 
 type Pos   = Int
-type Chrom = String
+type Chrom = Text
 
 data Window a = Window {
     start :: Pos
@@ -72,14 +72,14 @@ alignSnp snp = do
   put $ WindowState newActive remaining''
   return $ passed ++ passed'
 
-{- Generate a window state which has empty active
- windows, and an infinite list of inactive windows
- with sizes based on the passed config -}
+{- Generate a window state which has an empty list as -
+ - active windows, and an infinite list of inactive   -
+ - windows with sizes based on the passed config      -}
 initWindows :: WindowConfig -> WindowState a
-initWindows cfg = let 
-  size = windowSize cfg
-  step = windowStep cfg
-  wInactive = zipWith (\a b -> Window a b [])
-    (map (+1) [0, step ..])
-    [size, (step + size) .. ]
-  in WindowState [] wInactive
+initWindows cfg = WindowState { active = [], inactive = wInactive }
+  where
+    wInactive = zipWith (\a b -> Window a b [])
+      (map (+1) [0, step ..])
+      [size, (step + size) .. ]
+    size = windowSize cfg
+    step = windowStep cfg
