@@ -4,9 +4,10 @@ import Control.Applicative
 import Options.Applicative
 
 data Options = Options {
-   input :: Maybe String
- , wSize :: Int
- , wStep :: Int
+   input  :: Maybe String
+ , wSize  :: Int
+ , wStep  :: Int
+ , nohead :: Bool
 } deriving (Show, Eq)
 
 getOptions = execParser $ info (helper <*> options)
@@ -34,5 +35,9 @@ options = Options <$>
           long "step" <>
           metavar "INT" <>
           help "set the size of every step between windows"
+        )
+  <*> switch
+        ( long "no-header" <>
+          help "include the first line, since it's not a header"
         )
   

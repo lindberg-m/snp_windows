@@ -4,7 +4,7 @@ import Snp_windows
 
 import Data.Maybe                    (catMaybes)
 import System.IO                     (hPutStrLn, stderr)
-import System.Exit                   (exitFailure)
+import System.Exit                   (die)
 import Control.Monad.Trans.Except    (Except, except, runExcept, catchE, throwE)
 import Data.Text.Lazy                (Text, pack, unpack, splitOn)
 import Data.Text.Lazy.Read           (decimal, double)
@@ -48,8 +48,7 @@ reportSNPerror (i,x) =
         
   where
     printErr e = do 
-      hPutStrLn stderr $ "Error: " ++ e
-      exitFailure
+      die $ "Error: " ++ e
       return Nothing
 
 assertSNPorder :: [ParsedSNP a] -> [ParsedSNP a]
