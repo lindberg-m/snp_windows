@@ -1,86 +1,73 @@
-module Snp_parser (parseSNPs, ParseError (..), reportSNPerror) where
+module Snp_parser (parseSNPs, parseSNPs', ParseError (..), ParsedSNP) where
 
 import Snp_windows
 
-import Data.Maybe                    (catMaybes)
-import System.IO                     (hPutStrLn, stderr)
-import System.Exit                   (die)
-import Control.Monad.Trans.Except    (Except, except, runExcept, catchE, throwE)
+import Control.Applicative
+import System.IO 
+import System.Exit                   (die, exitFailure)
+import Control.Monad.Trans           (lift, liftIO)
+import Control.Monad.Trans.Except    (Except, ExceptT, ExceptT (..), runExceptT, catchE, throwE)
 import Data.Text.Lazy                (Text, pack, unpack, splitOn)
 import Data.Text.Lazy.Read           (decimal, double)
 
 data ParseError = UnsortedSNPs 
                 | PositionUnparsed String
                 | ValueUnparsed String
-                | TooFewFields Int Int
+                | TooFewFields 
                 | ParseError String
                 deriving (Show, Eq)
 
-type ParsedSNP a = Except ParseError (SNP a)
+type LineNumber = Int
 
-parseSNPs :: [Text] -> [ParsedSNP Double]
-parseSNPs = assertSNPorder . (map parseFields)
+type ParsedSNP a = Except String (SNP a)
 
-reportSNPs :: [ParsedSNP a] -> IO [SNP a]
-reportSNPs parsed_snps = do
-  m_snps <- sequence . (map reportSNPerror) $ enumerate parsed_snps
-  return $ catMaybes m_snps
-  where
-    enumerate = zip [1..]
-
--- take line-number and parsed SNP and performs IO to report parse-error to user.
-reportSNPerror :: (Int, ParsedSNP a) -> IO (Maybe (SNP a))
-reportSNPerror (i,x) = 
-  case runExcept x of
-    Left UnsortedSNPs -> do 
-      printErr $ "The SNPs are not in order (line " ++ show i ++
-                  " and " ++ show (i + 1) ++ ")."
-    Left (PositionUnparsed e) -> do
-      printErr $ "The position-field could not be parsed at line " ++ show i ++ ": " ++ e
-    Left (ValueUnparsed e) -> do
-      printErr $ "Could not parse the value-field(s) at line " ++ show i ++": " ++ e
-    Left (TooFewFields a b) -> do
-      printErr $ "Missing fields at line " ++ show i ++ ". " ++ show a ++ " fields present when " ++
-                     show b ++ " fields is the minimum required"
-    Left (ParseError e) -> do
-      printErr $ "Couldn't parse line " ++ show i ++ ": " ++ e
-    Right x -> return $ Just x
-        
-  where
-    printErr e = do 
-      die $ "Error: " ++ e
-      return Nothing
-
-assertSNPorder :: [ParsedSNP a] -> [ParsedSNP a]
-assertSNPorder = (map except) . (foldr f []) . (map runExcept)
-  where
-    f (Right x) l@((Right y):_) 
-      | pos x > pos y && chrom x == chrom y = (Left UnsortedSNPs) : l
-      | otherwise                           = (Right x) : l
-    f x l = x : l
-
-{-
-   Main parser function.
-   For expanding to multiple values, edit this function
-   along with the ParsedSNP-alias 
+{- Simplest and primary way of parsing a list of SNPs
+ - is the function "parseSNPs"
+ - The error (Left) value contains information about
+ - what caused the failure as well as line number 
+ -
+ - Remaining parsers are more general 
+ - (parseSNPs' & parseSNPs'')
+ -
  -}
-parseFields :: Text -> ParsedSNP Double
-parseFields txt = let
-  fields = splitOn (pack "\t") txt
-  in if not $ fields `longerThan` 2
-     then except . Left $ TooFewFields (length fields) 3
-     else toSNP fields
+parseSNPs :: [Text] -> [ParsedSNP Double]
+parseSNPs = parseSNPs'
+
+parseSNPs' :: Monad m => [Text] -> [ExceptT String m (SNP Double)]
+parseSNPs' = map parseErrorLineNumber .
+             zip [1..] . 
+             parseSNPs'' getDouble
   where
-    toSNP (x1:x2:x3:_) = do
-      pos <- catchE (except $ decimal x2) (\e -> throwE $ PositionUnparsed e)
-      val <- catchE (except $ double x3) (\e -> throwE $ ValueUnparsed e)
-      return $ SNP x1 (fst pos) (fst val)
+    parseErrorLineNumber (i,x) = catchE x (\e -> throwE $ errorLineMsg i e)
+    getDouble = (fmap fst) . double . head
 
-longerThan :: [a] -> Int -> Bool
-longerThan lst len = let
-  mlen = dropWhile ( <= len) runningLength
-  runningLength = (map snd $ zip lst [1..])
-  in case mlen of
-      [] -> False
-      xs -> head xs > len
+parseSNPs'' :: Monad m => ([Text] -> Either String a) -> [Text] -> [ExceptT ParseError m (SNP a)]
+parseSNPs'' f txt = assertSNPorder $ map (toSnp . sepFields) txt
+  where sepFields = splitOn $ pack "\t"
+        toSnp (x1:x2:xs) = catchE (ExceptT . return $ decimal x2) (\e -> throwE $ PositionUnparsed e) >>=
+                           \a -> catchE (ExceptT . return $ f xs) (\e -> throwE $ ValueUnparsed e) >>=
+                           \b -> return $ SNP x1 (fst a) b
+        toSnp _          = throwE TooFewFields
 
+assertSNPorder :: Monad m => [ExceptT ParseError m (SNP a)] -> [ExceptT ParseError m (SNP a)] 
+assertSNPorder = (foldr f []) . (map runExceptT)
+  where
+  f x l@(y:_) = let
+    v = g <$> x <*> (runExceptT y)
+    in (ExceptT v) : l
+  f x [] = [ExceptT x]
+  
+  g a b = case (a,b) of
+    (Right x, Right y) -> if pos x > pos y
+                          then Left UnsortedSNPs
+                          else a
+    _                  -> a
+      
+errorLineMsg :: LineNumber -> ParseError -> String
+errorLineMsg i UnsortedSNPs = "The SNPs are not in order (line " ++ show i ++
+                              " and " ++ show (i + 1) ++ ")."
+errorLineMsg i (PositionUnparsed e) = "The position-field could not be parsed at line " ++ 
+                                       show i ++ ": " ++ e
+errorLineMsg i (ValueUnparsed e) = "Could not parse the value-field(s) at line " ++ show i ++": " ++ e
+errorLineMsg i TooFewFields  = "Missing fields at line " ++ show i ++ "." 
+errorLineMsg i (ParseError e) = "Couldn't parse line " ++ show i ++ ": " ++ e

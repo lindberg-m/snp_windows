@@ -1,4 +1,4 @@
-module Interface (getOptions, Options) where
+module Interface (getOptions, Options (..)) where
 
 import Control.Applicative
 import Options.Applicative
@@ -34,7 +34,7 @@ options = Options <$>
         ( short 't' <>
           long "step" <>
           metavar "INT" <>
-          help "set the size of every step between windows"
+          help "set the size of steps of windows"
         )
   <*> switch
         ( long "no-header" <>

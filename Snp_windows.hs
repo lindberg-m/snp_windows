@@ -1,4 +1,10 @@
-module Snp_windows (calcWindows, Window (..), initWindows, WindowConfig (..), SNP (..) ) where
+module Snp_windows 
+    (calcWindows, 
+     Window (..), 
+     Chrom,
+     initWindows, 
+     WindowConfig (..), 
+     SNP (..) ) where
 
 import Control.Monad.State
 import Data.Text.Lazy (Text)

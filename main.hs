@@ -2,19 +2,28 @@ import Interface
 import Snp_parser
 import Snp_windows
 
-import System.Environment
-import Control.Monad (liftM)
-import Control.Monad.Trans.Except
-import Data.Either
-import Data.List
+import System.IO                   (hGetContents, stdin)
+import System.Exit                 (die)
+import Control.Monad               (liftM)
+import Control.Monad.Trans.Except  (runExcept)
+import Data.Either                 (rights, isRight)
+import Data.List                   (foldl')
 import qualified Data.Text.Lazy as T
 import qualified Data.Text.Lazy.IO as TIO
 
 main :: IO ()
-main = getOptions >>= print
+main = do 
+  opts <- getOptions 
+  let getContent = case input opts of
+         Nothing  -> TIO.hGetContents stdin
+         (Just x) -> TIO.readFile x
+      toLines = if nohead opts
+                then T.lines
+                else tail . T.lines
+      config = WindowConfig (wSize opts) (wStep opts)
 
-
-type Chrom = T.Text
+  txt <- liftM toLines getContent
+  printResults  $ getSNPs config (parseSNPs txt)
 
 data WindowStats = WindowStats {
     samples :: Int
@@ -26,9 +35,41 @@ data WindowStats = WindowStats {
 
 instance Show WindowStats where
   show (WindowStats s m st e c) =
-     show c ++ "\t" ++ show st ++ "\t" ++ show e ++ "\t" ++ show s ++"\t"++ show m
+     T.unpack c ++ "\t" ++ show st ++ "\t" ++ show e ++ "\t" ++ show s ++"\t"++ show m
+
+-- (list of chromosomes-windows, failed parsings (starting with a left value))
+type SNPparseResults a = ([(Chrom, [Window a])], [Either String (SNP a)])
+
+printResults :: SNPparseResults Double -> IO ()
+printResults (res, failed) = do
+   mapM_ print  . concat $ map getRes res
+   mapM_ catchError failed
+   where
+   --  getRes :: (Chrom, [Window Double]) -> [WindowStats]
+     getRes (chr, w) = map (meanWindow chr) w
+     catchError (Left err) = die $ "\nError: \n " ++ err ++ "\n"
+     catchError _          = return ()
+
+{- 
+ - Provided a config for window-sizes, generate a tuple
+ - with all windows in as first element, and snps
+ - not mapped to windows in the second element - starting
+ - with the first error code from the snp-parsing
+ -}
+
+getSNPs :: WindowConfig -> [ParsedSNP a] -> SNPparseResults a
+getSNPs wc = mapFirst (calcWindows wc) . span isRight . map runExcept
+  where
+    mapFirst f (x,y) = (f $ rights x, y)
+
+
 
 meanWindow :: Chrom -> Window Double -> WindowStats
-meanWindow c w = WindowStats (round n) (sum / n) (Snp_windows.start w) (Snp_windows.end w) c
+meanWindow c w = WindowStats {
+    samples = (round n),
+    mean = (sum / n),
+    Main.start = (Snp_windows.start w),
+    Main.end = (Snp_windows.end w),
+    Main.chrom = c}
   where
     (n, sum) = foldl' (\(n', s) x -> (n' + 1, s + x)) (0.0,0.0) (wData w)
