@@ -1,91 +1,73 @@
-module Snp_windows 
-    (calcWindows, 
-     Window (..), 
-     Chrom,
-     initWindows, 
-     WindowConfig (..), 
-     SNP (..) ) where
+import Interface
+import Snp_parser
+import Calc_windows
 
-import Control.Monad.State
-import Data.Text.Lazy (Text)
-import Data.List (groupBy)
+import System.IO                   (hGetContents, stdin)
+import System.Exit                 (die)
+import Control.Monad               (liftM)
+import Control.Monad.Trans.Except  (runExcept)
+import Data.Either                 (rights, isRight)
+import Data.List                   (foldl')
+import qualified Data.Text.Lazy as T
+import qualified Data.Text.Lazy.IO as TIO
 
-type Pos   = Int
-type Chrom = Text
+main :: IO ()
+main = do 
+  opts <- getOptions 
+  let getContent = case input opts of
+         Nothing  -> TIO.hGetContents stdin
+         (Just x) -> TIO.readFile x
+      toLines = if nohead opts
+                then T.lines
+                else tail . T.lines
+      config = WindowConfig (wSize opts) (wStep opts)
 
-data Window a = Window {
-    start :: Pos
-  , end   :: Pos
-  , wData :: [a]
-} deriving (Show, Eq)
+  txt <- liftM toLines getContent
+  printResults  $ getSNPs config (parseSNPs txt)
 
-data WindowConfig = WindowConfig {
-    windowSize :: Int
-  , windowStep :: Int
-} deriving (Show, Eq)
+data WindowStats = WindowStats {
+    samples :: Int
+  , mean    :: Double
+  , start   :: Int
+  , end     :: Int
+  , chrom   :: Chrom
+}
 
-data WindowState a = WindowState {
-    active   :: [Window a]
-  , inactive :: [Window a]
-} deriving (Eq)
+instance Show WindowStats where
+  show (WindowStats s m st e c) =
+     T.unpack c ++ "\t" ++ show st ++ "\t" ++ show e ++ "\t" ++ show s ++"\t"++ show m
 
-instance Show a => Show (WindowState a) where
-  show (WindowState act inact) =
-    "WindowState: Active {" ++ (show act) ++ "}"
+-- (list of chromosomes-windows, failed parsings (starting with a left value))
+type SNPparseResults a = ([(Chrom, [Window a])], [Either String (SNP a)])
 
-data SNP a = SNP {
-    chrom  :: Chrom
- ,  pos    :: Pos
- ,  snpDat :: a
-} deriving (Show, Eq)
+printResults :: SNPparseResults Double -> IO ()
+printResults (res, failed) = do
+   mapM_ print . concat $ map getRes res
+   mapM_ catchError failed
+   where
+   --  getRes :: (Chrom, [Window Double]) -> [WindowStats]
+     getRes (chr, w) = map (meanWindow chr) w
+     catchError (Left err) = die $ "\nError: \n " ++ err ++ "\n"
+     catchError _          = return ()
 
+{- 
+ - Provided a config for window-sizes, generate a tuple
+ - with all windows in as first element, and snps
+ - not mapped to windows in the second element - starting
+ - with the first error code from the snp-parsing
+ -}
 
-calcWindows :: WindowConfig -> [SNP a] -> [(Chrom, [Window a])]
-calcWindows wc snps = map toWindows chrSnps 
+getSNPs :: WindowConfig -> [ParsedSNP a] -> SNPparseResults a
+getSNPs wc = mapFirst (calcWindows wc) . span isRight . map runExcept
   where
-    chrSnps         = groupBy (\a b -> chrom a == chrom b) snps
-    toWindows snps' = (chrom $ head snps', align (initWindows wc) snps')
+    mapFirst f (x,y) = (f $ rights x, y)
 
-{- Populate the window-state with snp-data and return
-   a list of populated windows -}
-align :: WindowState a -> [SNP a] -> [Window a]
-align ws [] = active ws   -- Flush out all remaining active windows and stop
-align ws (snp:snps) = doneWindows ++ (align newWindows snps)
+meanWindow :: Chrom -> Window Double -> WindowStats
+meanWindow c w = WindowStats {
+    samples = (round n),
+    mean = (sum / n),
+    Main.start = (Calc_windows.start w),
+    Main.end = (Calc_windows.end w),
+    Main.chrom = c}
   where
-    (doneWindows, newWindows) = runState (alignSnp snp) ws
-
-{- Compare the current SNP to the window state:
- Active and inactive windows which has endpoints
- above the current SNP should be returned, active
- windows for which the SNP is overlapping should
- be updated to also carry the current SNP-data, 
- and any inactive windows that have overlapping 
- positions should be updated and moved to 
- the 'active' position.  -}
-alignSnp :: SNP a -> State (WindowState a) [Window a]
-alignSnp snp = do
-  ws <- get
-  let
-    (passed, remaining)     = span downstreamSnp (active ws)
-    (passed', remaining')   = span downstreamSnp (inactive ws)
-    (overlaps, remaining'') = span overlapSnp remaining'
-    newActive               = map updateWindow (remaining ++ overlaps)
-    
-    downstreamSnp wndw  = (end wndw) <= (pos snp)     --snp is downstream of window 
-    overlapSnp wndw     = ((start wndw) <= (pos snp)) && ((end wndw) >= (pos snp))
-    updateWindow wndw   = Window (start wndw) (end wndw) ((snpDat snp) : wData wndw)
-  
-  put $ WindowState newActive remaining''
-  return $ passed ++ passed'
-
-{- Generate a window state which has an empty list as -
- - active windows, and an infinite list of inactive   -
- - windows with sizes based on the passed config      -}
-initWindows :: WindowConfig -> WindowState a
-initWindows cfg = WindowState { active = [], inactive = wInactive }
-  where
-    wInactive = zipWith (\a b -> Window a b [])
-      (map (+1) [0, step ..])
-      [size, (step + size) .. ]
-    size = windowSize cfg
-    step = windowStep cfg
+    (n, sum) = foldl' (\(n', s) x -> (n' + 1, s + x)) (0.0,0.0) (wData w)

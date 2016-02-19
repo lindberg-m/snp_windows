@@ -1,6 +1,6 @@
 module Snp_parser (parseSNPs, parseSNPs', ParseError (..), ParsedSNP) where
 
-import Snp_windows
+import Calc_windows
 
 import Control.Applicative
 import System.IO 
@@ -28,7 +28,6 @@ type ParsedSNP a = Except String (SNP a)
  -
  - Remaining parsers are more general 
  - (parseSNPs' & parseSNPs'')
- -
  -}
 parseSNPs :: [Text] -> [ParsedSNP Double]
 parseSNPs = parseSNPs'
@@ -58,7 +57,7 @@ assertSNPorder = (foldr f []) . (map runExceptT)
   f x [] = [ExceptT x]
   
   g a b = case (a,b) of
-    (Right x, Right y) -> if pos x > pos y
+    (Right x, Right y) -> if pos x > pos y && chrom x == chrom y
                           then Left UnsortedSNPs
                           else a
     _                  -> a
