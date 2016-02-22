@@ -1,6 +1,9 @@
-module Snp_parser (parseSNPs, parseSNPs', ParseError (..), ParsedSNP) where
+module Snp_parser (parseSNPsFromLineNr, 
+                   parseSNPsFromLineNr', 
+                   ParseError (..), 
+                   ParsedSNP) where
 
-import Calc_windows
+import Calc_windows                  (SNP(..))
 
 import Control.Applicative
 import System.IO 
@@ -29,38 +32,39 @@ type ParsedSNP a = Except String (SNP a)
  - Remaining parsers are more general 
  - (parseSNPs' & parseSNPs'')
  -}
-parseSNPs :: [Text] -> [ParsedSNP Double]
-parseSNPs = parseSNPs'
+parseSNPsFromLineNr :: LineNumber -> [Text] -> [ParsedSNP Double]
+parseSNPsFromLineNr = parseSNPsFromLineNr' 
 
-parseSNPs' :: Monad m => [Text] -> [ExceptT String m (SNP Double)]
-parseSNPs' = map parseErrorLineNumber .
-             zip [1..] . 
-             parseSNPs'' getDouble
+parseSNPsFromLineNr' :: Monad m => LineNumber -> [Text] -> [ExceptT String m (SNP Double)]
+parseSNPsFromLineNr' i = map catchErrorLineNumber .
+                         enumerateFrom i .
+                         parseSNPs getDouble
   where
-    parseErrorLineNumber (i,x) = catchE x (\e -> throwE $ errorLineMsg i e)
+    enumerateFrom n = zip [n..]
+    catchErrorLineNumber (i,x) = catchE x (\e -> throwE $ errorLineMsg i e)
     getDouble = (fmap fst) . double . head
 
-parseSNPs'' :: Monad m => ([Text] -> Either String a) -> [Text] -> [ExceptT ParseError m (SNP a)]
-parseSNPs'' f txt = assertSNPorder $ map (toSnp . sepFields) txt
+parseSNPs :: Monad m => ([Text] -> Either String a) -> [Text] -> [ExceptT ParseError m (SNP a)]
+parseSNPs f = assertSNPorder . map (toSnp . sepFields) 
   where sepFields = splitOn $ pack "\t"
         toSnp (x1:x2:xs) = catchE (ExceptT . return $ decimal x2) (\e -> throwE $ PositionUnparsed e) >>=
-                           \a -> catchE (ExceptT . return $ f xs) (\e -> throwE $ ValueUnparsed e) >>=
-                           \b -> return $ SNP x1 (fst a) b
+                           \(a,_) -> catchE (ExceptT . return $ f xs) (\e -> throwE $ ValueUnparsed e) >>=
+                           \b     -> return $ SNP x1 a b
         toSnp _          = throwE TooFewFields
 
 assertSNPorder :: Monad m => [ExceptT ParseError m (SNP a)] -> [ExceptT ParseError m (SNP a)] 
 assertSNPorder = (foldr f []) . (map runExceptT)
   where
-  f x l@(y:_) = let
-    v = g <$> x <*> (runExceptT y)
-    in (ExceptT v) : l
-  f x [] = [ExceptT x]
-  
-  g a b = case (a,b) of
-    (Right x, Right y) -> if pos x > pos y && chrom x == chrom y
-                          then Left UnsortedSNPs
-                          else a
-    _                  -> a
+    f x l@(y:_) = let
+      v = g <$> x <*> (runExceptT y)
+      in (ExceptT v) : l
+    f x [] = [ExceptT x]
+    
+    g a b = case (a,b) of
+      (Right x, Right y) -> if pos x > pos y && chrom x == chrom y
+                            then Left UnsortedSNPs
+                            else a
+      _                  -> a
       
 errorLineMsg :: LineNumber -> ParseError -> String
 errorLineMsg i UnsortedSNPs = "The SNPs are not in order (line " ++ show i ++
