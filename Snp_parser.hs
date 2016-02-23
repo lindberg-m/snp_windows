@@ -10,7 +10,7 @@ import System.IO
 import System.Exit                   (die, exitFailure)
 import Control.Monad.Trans           (lift, liftIO)
 import Control.Monad.Trans.Except    (Except, ExceptT, ExceptT (..), runExceptT, catchE, throwE)
-import Data.Text.Lazy                (Text, pack, unpack, splitOn)
+import qualified Data.Text.Lazy      as T
 import Data.Text.Lazy.Read           (decimal, double)
 
 data ParseError = UnsortedSNPs 
@@ -32,21 +32,23 @@ type ParsedSNP a = Except String (SNP a)
  - Remaining parsers are more general 
  - (parseSNPs' & parseSNPs'')
  -}
-parseSNPsFromLineNr :: LineNumber -> [Text] -> [ParsedSNP Double]
+parseSNPsFromLineNr :: LineNumber -> T.Text -> [ParsedSNP Double]
 parseSNPsFromLineNr = parseSNPsFromLineNr' 
 
-parseSNPsFromLineNr' :: Monad m => LineNumber -> [Text] -> [ExceptT String m (SNP Double)]
+parseSNPsFromLineNr' :: Monad m => LineNumber -> T.Text -> [ExceptT String m (SNP Double)]
 parseSNPsFromLineNr' i = map catchErrorLineNumber .
                          enumerateFrom i .
+                         drop (i - 1) .
                          parseSNPs getDouble
+                         
   where
     enumerateFrom n = zip [n..]
     catchErrorLineNumber (i,x) = catchE x (\e -> throwE $ errorLineMsg i e)
     getDouble = (fmap fst) . double . head
 
-parseSNPs :: Monad m => ([Text] -> Either String a) -> [Text] -> [ExceptT ParseError m (SNP a)]
-parseSNPs f = assertSNPorder . map (toSnp . sepFields) 
-  where sepFields = splitOn $ pack "\t"
+parseSNPs :: Monad m => ([T.Text] -> Either String a) -> T.Text -> [ExceptT ParseError m (SNP a)]
+parseSNPs f = assertSNPorder . map (toSnp . sepFields) . T.lines
+  where sepFields = T.splitOn $ T.pack "\t"
         toSnp (x1:x2:xs) = catchE (ExceptT . return $ decimal x2) (\e -> throwE $ PositionUnparsed e) >>=
                            \(a,_) -> catchE (ExceptT . return $ f xs) (\e -> throwE $ ValueUnparsed e) >>=
                            \b     -> return $ SNP x1 a b
