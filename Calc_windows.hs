@@ -1,17 +1,18 @@
 module Calc_windows 
     (calcWindows, 
+     calcWindows',
      WindowStats (..),
      Window (..), 
      Chrom,
-     initWindows, 
      WindowConfig (..), 
      SNP (..) ) where
 
-import Control.Monad.State
-import Control.Monad.Reader
+import Control.Monad.Trans         (lift)
+import Control.Monad.Trans.State   (get, put, runState, evalState, execState, State)
+import Control.Monad.Trans.Reader  (ReaderT, ask, runReaderT, runReader, Reader)
+import Data.Text.Lazy              (Text, unpack)
 import Data.Monoid
-import Data.Text.Lazy (Text, unpack)
-import Data.List (groupBy)
+import Data.List                   (groupBy)
 
 type Pos   = Int
 type Chrom = Text
@@ -51,21 +52,25 @@ instance Monoid a => Monoid (WindowStats a) where
   mempty  = WindowStats 0 mempty
   (WindowStats x a) `mappend` (WindowStats y b) = WindowStats (x + y) (a <> b)
 
-calcWindows :: WindowConfig -> [SNP Double] -> [(Chrom, [Window (Sum Double)])]
-calcWindows wc snps = map toWindows chrSnps 
-  where
-    chrSnps         = groupBy (\a b -> chrom a == chrom b) snps
-    toWindows snps' = (chrom $ head snps', align (initWindows wc) snps')
+calcWindows :: [SNP Double] -> Reader WindowConfig [(Chrom, [Window (Sum Double)])]
+calcWindows snps = runReaderT (calcWindows' snps) Sum
 
-{- Populate the window-state with snp-data and return
-   a list of populated windows -}
-align = align' Sum
+calcWindows' :: Monoid b => [SNP a] -> ReaderT (a -> b) (Reader WindowConfig) [(Chrom, [Window b])]
+calcWindows' snps = do
+  start_windows <- lift initWindows
+  readValue     <- ask
+  let chrSnps      = groupBy (\a b -> chrom a == chrom b) snps
+      toWindows xs = (chrom $ head xs, align' xs start_windows)
+      align' xs    = evalState (runReaderT (align xs) readValue)
+  return $ map toWindows chrSnps
 
-align' :: Monoid b => (a -> b) -> WindowState b -> [SNP a] -> [Window b]
-align' _ ws [] = active ws   -- Flush out all remaining active windows and stop
-align' f ws (snp:snps) = doneWindows ++ (align' f newWindows snps)
-  where
-    (doneWindows, newWindows) = runState (alignSnp f snp) ws
+
+align :: Monoid b => [SNP a] -> ReaderT (a -> b) (State (WindowState b)) [Window b]
+align [] = lift (get >>= \a -> return $ active a) -- Flush out all remaining active windows and stop
+align (snp:snps) = do
+  alignedSnp <- alignSnp snp
+  newAligned <- align snps
+  return $ alignedSnp ++ newAligned
 
 {- Compare the current SNP to the window state:
  Active and inactive windows which has endpoints
@@ -75,9 +80,10 @@ align' f ws (snp:snps) = doneWindows ++ (align' f newWindows snps)
  and any inactive windows that have overlapping 
  positions should be updated and moved to 
  the 'active' position.  -}
-alignSnp :: Monoid b => (a -> b) -> SNP a -> State (WindowState b) [Window b]
-alignSnp f snp = do
-  ws <- get
+alignSnp :: Monoid b => SNP a -> ReaderT (a -> b) (State (WindowState b)) [Window b]
+alignSnp snp = do
+  adder <- addToWindow
+  ws    <- lift get
   let
     (passed, remaining)     = span downstreamSnp (active ws)
     (passed', remaining')   = span downstreamSnp (inactive ws)
@@ -86,27 +92,28 @@ alignSnp f snp = do
     
     downstreamSnp wndw  = (end wndw) <= (pos snp)     --snp is downstream of window 
     overlapSnp wndw     = ((start wndw) <= (pos snp)) && ((end wndw) >= (pos snp))
-    updateWindow wndw   = addToWindow f (snpDat snp) wndw
+    updateWindow wndw   = adder (snpDat snp) wndw
   
-  put $ WindowState newActive remaining''
+  lift . put $ WindowState newActive remaining''
   return $ passed ++ passed'
+
+addToWindow :: (Monoid b, Monad m) => ReaderT (a -> b) m (a -> Window b -> Window b)
+addToWindow = do
+  f <- ask
+  return $ \x wdw -> Window (start wdw) (end wdw) (WindowStats (1 + (windowSamples $ wData wdw)) 
+                     ((windowDat $ wData wdw) <> (f x)))
 
 {- Generate a window state which has an empty list as -
  - active windows, and an infinite list of inactive   -
  - windows with sizes based on the passed config      -}
-initWindows :: Monoid a => WindowConfig -> WindowState a
-initWindows cfg = WindowState { active = [], inactive = wInactive }
-  where
+initWindows :: (Monoid a, Monad m) => ReaderT WindowConfig m (WindowState a)
+initWindows = do
+  cfg <- ask
+  return $ let
     wInactive = zipWith (\a b -> Window a b mempty)
       (map (+1) [0, step ..])
-      [size, (step + size) .. ]
+      [size, (step + size) ..]
     size = windowSize cfg
     step = windowStep cfg
-
-addToWindow :: Monoid b => (a -> b) -> a -> Window b -> Window b
-addToWindow f a b = Window (start b) (end b) (WindowStats k y)
-  where
-    k = 1 + (windowSamples $ wData b)
-    y = (windowDat $ wData b) <> (f a)
-
+    in WindowState { active = [], inactive = wInactive }
 
