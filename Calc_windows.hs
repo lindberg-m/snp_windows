@@ -8,7 +8,7 @@ module Calc_windows
      SNP (..) ) where
 
 import Control.Monad.Trans         (lift)
-import Control.Monad.Trans.State   (get, put, runState, evalState, execState, State)
+import Control.Monad.Trans.State   (get, put, runState, evalState, State)
 import Control.Monad.Trans.Reader  (ReaderT, ask, runReaderT, runReader, Reader)
 import Data.Text.Lazy              (Text, unpack)
 import Data.Monoid
@@ -52,7 +52,7 @@ instance Monoid a => Monoid (WindowStats a) where
   mempty  = WindowStats 0 mempty
   (WindowStats x a) `mappend` (WindowStats y b) = WindowStats (x + y) (a <> b)
 
-calcWindows :: [SNP Double] -> Reader WindowConfig [(Chrom, [Window (Sum Double)])]
+calcWindows :: Num a => [SNP a] -> Reader WindowConfig [(Chrom, [Window (Sum a)])]
 calcWindows snps = runReaderT (calcWindows' snps) Sum
 
 calcWindows' :: Monoid b => [SNP a] -> ReaderT (a -> b) (Reader WindowConfig) [(Chrom, [Window b])]
@@ -101,7 +101,7 @@ addToWindow :: (Monoid b, Monad m) => ReaderT (a -> b) m (a -> Window b -> Windo
 addToWindow = do
   f <- ask
   return $ \x wdw -> Window (start wdw) (end wdw) (WindowStats (1 + (windowSamples $ wData wdw)) 
-                     ((windowDat $ wData wdw) <> (f x)))
+                     ((f x) <> (windowDat $ wData wdw)))
 
 {- Generate a window state which has an empty list as -
  - active windows, and an infinite list of inactive   -

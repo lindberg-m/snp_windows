@@ -44,7 +44,6 @@ printResults (res, failed) = do
              n        = windowSamples $ wData wind
              sum      = getSum . windowDat $ wData wind
                        
-
 {- 
  - Provided a config for window-sizes, generate a tuple
  - with all windows in as first element, and snps

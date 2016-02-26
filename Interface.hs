@@ -1,6 +1,5 @@
 module Interface (getOptions, Options (..)) where
 
-import Control.Applicative
 import Options.Applicative
 
 data Options = Options {
