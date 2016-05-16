@@ -1,18 +1,19 @@
-module Calc_windows 
-    (calcWindows, 
+module Calc_windows
+    (calcWindows,
      calcWindows',
      WindowStats (..),
-     Window (..), 
+     Window (..),
      Chrom,
-     WindowConfig (..), 
+     WindowConfig (..),
      SNP (..) ) where
 
-import Control.Monad.Trans         (lift)
-import Control.Monad.Trans.State   (get, put, runState, evalState, State)
-import Control.Monad.Trans.Reader  (ReaderT, ask, runReaderT, runReader, Reader)
-import Data.Text.Lazy              (Text, unpack)
-import Data.Monoid
-import Data.List                   (groupBy)
+import           Control.Monad.Trans        (lift)
+import           Control.Monad.Trans.Reader (Reader, ReaderT, ask,
+                                             runReaderT)
+import           Control.Monad.Trans.State  (State, evalState, get, put)
+import           Data.List                  (groupBy)
+import           Data.Monoid
+import           Data.Text.Lazy             (Text)
 
 type Pos   = Int
 type Chrom = Text
@@ -34,7 +35,7 @@ data WindowState a = WindowState {
 } deriving (Eq)
 
 instance Show a => Show (WindowState a) where
-  show (WindowState act inact) =
+  show (WindowState act _) =
     "WindowState: Active {" ++ (show act) ++ "}"
 
 data SNP a = SNP {
@@ -66,19 +67,19 @@ calcWindows' snps = do
 
 
 align :: Monoid b => [SNP a] -> ReaderT (a -> b) (State (WindowState b)) [Window b]
-align [] = lift (get >>= \a -> return $ active a) -- Flush out all remaining active windows and stop
+align [] = lift get >>= return . active  -- Flush out all remaining active windows and stop
 align (snp:snps) = do
-  alignedSnp <- alignSnp snp
-  newAligned <- align snps
-  return $ alignedSnp ++ newAligned
+  alignedSnp  <- alignSnp snp
+  nextAligned <- align snps
+  return $ alignedSnp ++ nextAligned
 
 {- Compare the current SNP to the window state:
  Active and inactive windows which has endpoints
  above the current SNP should be returned, active
  windows for which the SNP is overlapping should
- be updated to also carry the current SNP-data, 
- and any inactive windows that have overlapping 
- positions should be updated and moved to 
+ be updated to also carry the current SNP-data,
+ and any inactive windows that have overlapping
+ positions should be updated and moved to
  the 'active' position.  -}
 alignSnp :: Monoid b => SNP a -> ReaderT (a -> b) (State (WindowState b)) [Window b]
 alignSnp snp = do
@@ -89,18 +90,18 @@ alignSnp snp = do
     (passed', remaining')   = span downstreamSnp (inactive ws)
     (overlaps, remaining'') = span overlapSnp remaining'
     newActive               = map updateWindow (remaining ++ overlaps)
-    
-    downstreamSnp wndw  = (end wndw) <= (pos snp)     --snp is downstream of window 
+
+    downstreamSnp wndw  = (end wndw) <= (pos snp)     --snp is downstream of window
     overlapSnp wndw     = ((start wndw) <= (pos snp)) && ((end wndw) >= (pos snp))
     updateWindow wndw   = adder (snpDat snp) wndw
-  
+
   lift . put $ WindowState newActive remaining''
   return $ passed ++ passed'
 
 addToWindow :: (Monoid b, Monad m) => ReaderT (a -> b) m (a -> Window b -> Window b)
 addToWindow = do
   f <- ask
-  return $ \x wdw -> Window (start wdw) (end wdw) (WindowStats (1 + (windowSamples $ wData wdw)) 
+  return $ \x wdw -> Window (start wdw) (end wdw) (WindowStats (1 + (windowSamples $ wData wdw))
                      ((f x) <> (windowDat $ wData wdw)))
 
 {- Generate a window state which has an empty list as -
@@ -116,4 +117,3 @@ initWindows = do
     size = windowSize cfg
     step = windowStep cfg
     in WindowState { active = [], inactive = wInactive }
-

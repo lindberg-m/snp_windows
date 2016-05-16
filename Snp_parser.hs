@@ -3,9 +3,6 @@ module Snp_parser (parseSNPsFromLineNr,
                    ParsedSNP) where
 
 import Calc_windows                  (SNP(..))
-
-import Control.Applicative           ((<$>),(<*>))
-import Control.Monad.Trans           (lift)
 import Control.Monad.Trans.Except    (Except, ExceptT, ExceptT (..), runExceptT, catchE, throwE)
 import qualified Data.Text.Lazy      as T
 import Data.Text.Lazy.Read           (decimal, double)
@@ -37,8 +34,9 @@ parseSNPsFromLineNr i = map catchErrorLineNumber .
                          parseSNPs getDouble
                          
   where enumerateFrom n = zip [n..] 
-        catchErrorLineNumber (i,x) = catchE x (\e -> throwE $ errorLineMsg i e)
+        catchErrorLineNumber (n,x) = catchE x (\e -> throwE $ errorLineMsg n e)
         getDouble = (fmap fst) . double . head
+
 
 parseSNPs :: Monad m => ([T.Text] -> Either String a) -> T.Text -> [ExceptT ParseError m (SNP a)]
 parseSNPs f = assertSNPorder . map (toSnp . sepFields) . T.lines
